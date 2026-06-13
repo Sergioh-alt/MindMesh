@@ -1,15 +1,25 @@
-import React, { useState } from 'react';
-import { Handle, Position, useReactFlow, NodeResizer } from '@xyflow/react';
+import React, { useState, useEffect } from 'react';
+import { Handle, Position, useReactFlow, NodeResizer, useHandleConnections } from '@xyflow/react';
 import { useEditMode } from '../contexts/EditModeContext';
 import { RotatableNodeWrapper } from './FlowCanvas';
+import { NODE_CONFIG } from '../constants';
 import axios from 'axios';
 
-const DecisionNode = ({ id, data, selected }) => {
+const DecisionNode = React.memo(({ id, data, selected }) => {
   const { updateNodeData } = useReactFlow();
   const { editMode, isMovementLocked, isFunctionLocked } = useEditMode();
-  const [conditionMet, setConditionMet] = useState(null); // null = pending, true = pass, false = fail
-
+  const [conditionMet, setConditionMet] = useState(data?.conditionMet ?? null); // null = pending, true = pass, false = fail
   const [textInput, setTextInput] = useState(data?.textInput ?? "");
+
+  const sourceConns = useHandleConnections({ type: 'source' });
+  const targetConns = useHandleConnections({ type: 'target' });
+  const isConnected = sourceConns.length > 0 || targetConns.length > 0;
+  const config = NODE_CONFIG.decisionNode;
+
+  useEffect(() => {
+    if (data?.conditionMet !== undefined) setConditionMet(data.conditionMet);
+    if (data?.textInput !== undefined) setTextInput(data.textInput);
+  }, [data?.conditionMet, data?.textInput]);
 
   const checkCondition = async () => {
     try {
@@ -19,11 +29,11 @@ const DecisionNode = ({ id, data, selected }) => {
       });
       const passed = res.data.passed;
       setConditionMet(passed);
-      updateNodeData(id, { passed, textInput });
+      updateNodeData(id, { conditionMet: passed, textInput });
     } catch (err) {
       console.warn("Decision API Check Failed", err);
       setConditionMet(false);
-      updateNodeData(id, { passed: false, textInput });
+      updateNodeData(id, { conditionMet: false, textInput });
     }
   };
 
@@ -33,62 +43,69 @@ const DecisionNode = ({ id, data, selected }) => {
 
   return (
     <RotatableNodeWrapper id={id} rotation={data?.rotation ?? 0} isMovementLocked={isMovementLocked} editMode={editMode} minWidth={180} minHeight={180}>
-      <div className={`relative min-w-[180px] min-h-[180px] pointer-events-none h-full flex items-center justify-center
-                       ${selected ? 'ring-2 ring-amber-500 ring-offset-4 ring-offset-dark-950' : ''}`}>
-        
-        {/* Diamond Shape Wrapper using CSS Rotation */}
-        <div className={`absolute inset-0 border-2 ${statusColor} bg-dark-900 overflow-hidden pointer-events-auto
-                         transition-all duration-300`}
-             style={{ transform: 'rotate(45deg)', background: 'linear-gradient(135deg, #1f1100 0%, #0f1629 100%)', borderRadius: '15px' }}>
-             {/* Diagonal inner scanline */}
-             <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(245,158,11,0.05)_50%)] bg-[length:100%_4px]" />
-        </div>
-
-        {/* Unrotated Content inside the Diamond */}
-        <div className="relative z-10 p-4 text-center pointer-events-auto w-[160px]">
-          {editMode && <div className="absolute -top-4 right-2 text-amber-500/80 text-[10px] animate-[spin_6s_linear_infinite]">⚙️</div>}
-          <div className="font-hud text-xs text-amber-400 tracking-widest mb-1">DECISION</div>
-          <div className="font-mono text-[9px] text-gray-400 uppercase leading-snug mb-2">
-            Length &gt; 200 words
-          </div>
+      <div className={`relative min-w-[260px] min-h-[220px] ${isConnected ? 'glow-active-amber' : ''}
+                       ${selected ? 'ring-2 ring-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : ''}
+                       ${conditionMet === null ? 'node-idle' : 'node-completed'}
+                       ${editMode ? 'node-edit-active' : ''} h-full pointer-events-none flex items-center justify-center`}>
+        <div className={`node-chassis glow-l glow-r border-[1.5px] ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : 'border-amber-500/30'} p-5 relative w-full h-full pointer-events-auto`}
+             style={{ background: 'var(--industrial-bg)' }}>
           
-          <textarea
-            disabled={isFunctionLocked}
-            value={textInput}
-            onChange={(e) => {
-              setTextInput(e.target.value);
-              updateNodeData(id, { textInput: e.target.value });
-            }}
-            placeholder="Payload input..."
-            className="w-full h-12 bg-dark-950 border border-amber-500/20 rounded resize-none text-[8px] font-mono p-1 text-gray-300 focus:outline-none focus:border-amber-500/60 custom-scrollbar pointer-events-auto nodrag"
-          />
+          {editMode && <div className="absolute top-2 right-2 text-amber-500/80 text-[10px] animate-[spin_6s_linear_infinite]">⚙️</div>}
           
-          <button
-            disabled={isFunctionLocked}
-            onClick={checkCondition}
-            className="mt-3 px-3 py-1 bg-dark-950 border border-amber-500/30 text-amber-500 text-[10px] font-mono rounded hover:bg-amber-500/10 transition-colors w-full"
-          >
-            VALIDATE
-          </button>
-
-          {conditionMet !== null && (
-            <div className={`mt-2 text-xs font-hud tracking-widest ${conditionMet ? 'text-neon-green' : 'text-neon-red'}`}>
-              {conditionMet ? '✓ PASS' : '✗ FAIL'}
+          <div className="flex flex-col h-full">
+            <div className="flex items-center gap-2 mb-4">
+               <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30
+                               flex items-center justify-center text-lg">{config?.emoji || '⚖️'}</div>
+               <div>
+                 <div className="font-hud text-xs text-amber-500 tracking-widest uppercase line-clamp-1">LOGIC-GATE</div>
+                 <div className="font-body text-sm font-semibold text-white">Decision Router</div>
+               </div>
+               <div className="ml-auto flex items-center">
+                 <div className={`w-2 h-2 rounded-full mr-1.5 ${conditionMet === null ? 'bg-gray-500' : conditionMet ? 'bg-neon-green shadow-[0_0_8px_#39ff14]' : 'bg-neon-red shadow-[0_0_8px_#ff0044]'}`} />
+                 <span className="text-[10px] font-mono text-gray-500 uppercase">{conditionMet === null ? 'IDLE' : conditionMet ? 'PASS' : 'FAIL'}</span>
+               </div>
             </div>
-          )}
+
+            <div className="space-y-4 flex-grow flex flex-col justify-center">
+               <div>
+                  <label className="text-[10px] text-gray-500 font-mono tracking-widest uppercase mb-1 block">CONDITION: LENGTH &gt; 200</label>
+                  <textarea
+                    disabled={isFunctionLocked}
+                    value={textInput}
+                    onChange={(e) => {
+                      setTextInput(e.target.value);
+                      updateNodeData(id, { textInput: e.target.value });
+                    }}
+                    placeholder="SOURCE_DATA..."
+                    className="w-full h-20 bg-dark-900 border border-amber-500/20 rounded px-2 py-1.5
+                               text-[10px] font-mono text-gray-300 focus:outline-none focus:border-amber-500/60 transition-all nodrag resize-none"
+                  />
+               </div>
+               
+               <button
+                 disabled={isFunctionLocked}
+                 onClick={checkCondition}
+                 className="w-full py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-500 text-[10px] font-hud tracking-widest font-bold hover:bg-amber-500/20 transition-all uppercase"
+               >
+                 RUN_GATE_VALIDATION
+               </button>
+
+               {conditionMet !== null && (
+                 <div className={`text-center py-1.5 border rounded bg-dark-950/50 text-[10px] font-hud tracking-[0.2em] font-bold ${conditionMet ? 'text-neon-green border-neon-green/30' : 'text-neon-red border-neon-red/30'}`}>
+                   {conditionMet ? 'PROTOCOL_AUTHORIZED' : 'ACCESS_DENIED'}
+                 </div>
+               )}
+            </div>
+          </div>
         </div>
 
-        {/* Input Handle (Top left edge of the diamond effectively) */}
-        <Handle id="decision-in" type="target" position={Position.Top} className="!w-3 !h-3 !bg-amber-500 !border-2 !border-dark-900" style={{ top: '-6px', zIndex: 999 }} />
-        
-        {/* Pass Output (Right) */}
-        <Handle id="decision-pass" type="source" position={Position.Right} className="!w-3 !h-3 !bg-neon-green !border-2 !border-dark-900" style={{ right: '-6px', zIndex: 999 }} />
-        
-        {/* Fail Output (Bottom) */}
-        <Handle id="decision-fail" type="source" position={Position.Bottom} className="!w-3 !h-3 !bg-neon-red !border-2 !border-dark-900" style={{ bottom: '-6px', zIndex: 999 }} />
+        {/* Repositioned Side-by-Side Handles */}
+        <Handle type="target" position={Position.Left} className="!translate-y-[-50%]" />
+        <Handle id="decision-pass" type="source" position={Position.Right} style={{ top: '35%' }} />
+        <Handle id="decision-fail" type="source" position={Position.Right} style={{ top: '65%' }} />
       </div>
     </RotatableNodeWrapper>
   );
-};
+});
 
 export default DecisionNode;

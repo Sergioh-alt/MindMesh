@@ -1,25 +1,17 @@
-import React, { useCallback, useState, useEffect } from 'react'
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  addEdge,
-  useNodesState,
-  useEdgesState,
-  Handle,
-  Position,
-  Panel,
-  MarkerType,
-  NodeResizer,
-  useReactFlow,
-} from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { ReactFlow, applyNodeChanges, applyEdgeChanges, addEdge, Background, Controls, MiniMap, Handle, Position, Panel, MarkerType, NodeResizer, useReactFlow, useHandleConnections } from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 import axios from 'axios'
 import { EditModeContext, useEditMode } from '../contexts/EditModeContext'
-import HardwareNode from './HardwareNode'
 import DecisionNode from './DecisionNode'
-import { DraggablePanel } from '../App'
+import BunkerNode from '../nodes/BunkerNode'
+import { DEFAULT_LAYOUT, NODE_CONFIG } from '../constants';
+import DraggablePanel from './DraggablePanel';
+import ImageNode from './ImageNode';
+import TelegramNode from '../nodes/TelegramNode';
+import ScraperNode from '../nodes/ScraperNode';
+import GenericCustomNode from './GenericCustomNode';
+import { getDynamicNodes } from '../utils/nodeRegistry';
 // ============================================================
 // Helper: Rotation & Resize Wrapper
 // ============================================================
@@ -74,7 +66,9 @@ export const RotatableNodeWrapper = ({ id, rotation, children, isMovementLocked,
           onPointerCancel={onPointerUp}
         />
       )}
-      {children}
+      <div className="w-full h-full overflow-hidden">
+        {children}
+      </div>
     </div>
   );
 };
@@ -100,12 +94,18 @@ const StatusDot = ({ status }) => {
 // ============================================================
 // NODE: Reddit Source
 // ============================================================
-const RedditSourceNode = ({ id, data, selected }) => {
+const RedditSourceNode = React.memo(({ id, data, selected }) => {
+  const { updateNodeData } = useReactFlow()
   const { editMode, isMovementLocked, isFunctionLocked } = useEditMode()
   const [subreddit, setSubreddit] = useState(data?.subreddit ?? 'MachineLearning')
   const [keyword, setKeyword] = useState(data?.keyword ?? '')
   const [status, setStatus] = useState('idle')
   const [posts, setPosts] = useState([])
+
+  useEffect(() => {
+    if (data?.subreddit !== undefined) setSubreddit(data.subreddit)
+    if (data?.keyword !== undefined) setKeyword(data.keyword)
+  }, [data?.subreddit, data?.keyword])
 
   const handleFetch = async () => {
     setStatus('processing')
@@ -119,93 +119,97 @@ const RedditSourceNode = ({ id, data, selected }) => {
     }
   }
 
+  const connections = useHandleConnections({ type: 'source' });
+  const isConnected = connections.length > 0;
+  const config = NODE_CONFIG.redditSource;
+
   return (
-    <RotatableNodeWrapper id={id} rotation={data?.rotation ?? 0} isMovementLocked={isMovementLocked} editMode={editMode} minWidth={240} minHeight={150}>
-    <div className={`relative min-w-[240px] rounded-xl ${selected ? 'ring-2 ring-neon-cyan' : ''} ${editMode ? 'node-edit-active' : 'node-idle'} h-full pointer-events-none`}>
-      <div className={`bg-dark-700 border ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : 'border-orange-600/30'} rounded-xl p-4 overflow-hidden relative w-full h-full pointer-events-auto`}
-           style={{ background: 'linear-gradient(135deg, #1e1000 0%, #0f1629 100%)' }}>
+    <RotatableNodeWrapper id={id} rotation={data?.rotation ?? 0} isMovementLocked={isMovementLocked} editMode={editMode} minWidth={260} minHeight={200}>
+    <div className={`relative min-w-[260px] min-h-[200px] ${isConnected ? config?.glow : ''} ${selected ? `ring-2 ring-${config?.color || 'orange'}-500 shadow-[0_0_15px_rgba(249,115,22,0.2)]` : ''} ${editMode ? 'node-edit-active' : 'node-idle'} h-full pointer-events-none flex items-center justify-center`}>
+      <div className={`node-chassis glow-b border-[1.5px] ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : `border-${config?.color || 'orange'}-500/30`} p-4 relative w-full h-full pointer-events-auto flex flex-col items-center justify-start text-center`}
+           style={{ background: 'var(--industrial-bg)' }}>
+        
         {editMode && <div className="absolute top-2 right-2 text-amber-500/80 text-[10px] animate-[spin_6s_linear_infinite]">⚙️</div>}
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 rounded-lg bg-orange-600/20 border border-orange-500/40
-                          flex items-center justify-center text-lg">🔴</div>
+        
+        <div className={`flex items-center gap-2 mb-3 w-full text-left`}>
+          <div className={`w-8 h-8 rounded-lg bg-${config?.color || 'orange'}-600/10 border border-${config?.color || 'orange'}-500/30
+                          flex items-center justify-center text-lg`}>{config?.emoji || '🔴'}</div>
           <div>
-            <div className="font-hud text-xs text-orange-400 tracking-widest">NODE-01</div>
-            <div className="font-body text-sm font-semibold text-white">Reddit Source</div>
+            <div className="font-hud text-xs text-orange-400 tracking-widest uppercase">REDDIT-IN</div>
+            <div className="font-body text-sm font-semibold text-white uppercase tracking-tighter">System Source</div>
           </div>
-          <div className="ml-auto flex items-center">
-            <StatusDot status={status} />
-            <span className="text-xs font-mono text-gray-400 capitalize">{status}</span>
+          <div className="ml-auto flex items-center gap-1">
+             <StatusDot status={status} />
           </div>
         </div>
 
-        <div className="space-y-2">
+        <div className="w-full space-y-3">
           <div>
-            <label className="text-xs text-gray-400 font-mono">SUBREDDIT</label>
-            <div className="flex items-center mt-1">
-              <span className="text-orange-400 text-sm font-mono mr-1">r/</span>
+            <label className="text-[10px] text-gray-500 font-mono tracking-widest uppercase mb-1 block text-left">Target Subreddit</label>
+            <div className="flex items-center">
+              <span className="text-orange-500 text-sm font-mono mr-1">r/</span>
               <input
                 disabled={isFunctionLocked}
                 value={subreddit}
-                onChange={e => setSubreddit(e.target.value)}
-                className="flex-1 bg-dark-900 border border-orange-500/20 rounded px-2 py-1
-                           text-sm text-white font-mono focus:outline-none focus:border-orange-500/60 disabled:opacity-50"
-                placeholder="subreddit"
+                onChange={e => {
+                  setSubreddit(e.target.value)
+                  updateNodeData(id, { subreddit: e.target.value })
+                }}
+                className="flex-1 bg-dark-900 border border-orange-500/20 px-2 py-1
+                           text-sm text-white font-mono focus:outline-none focus:border-orange-500/60 transition-all font-mono"
               />
             </div>
           </div>
+
           <div>
-            <label className="text-xs text-gray-400 font-mono">KEYWORD FILTER</label>
-            <input
-              disabled={isFunctionLocked}
-              value={keyword}
-              onChange={e => setKeyword(e.target.value)}
-              className="w-full mt-1 bg-dark-900 border border-orange-500/20 rounded px-2 py-1
-                         text-sm text-white font-mono focus:outline-none focus:border-orange-500/60 disabled:opacity-50"
-              placeholder="optional keyword..."
-            />
+             <label className="text-[10px] text-gray-500 font-mono tracking-widest uppercase mb-1 block text-left">Keyword Filter</label>
+             <input
+               disabled={isFunctionLocked}
+               value={keyword}
+               onChange={e => {
+                 setKeyword(e.target.value)
+                 updateNodeData(id, { keyword: e.target.value })
+               }}
+               className="w-full bg-dark-900 border border-orange-500/10 px-2 py-1
+                          text-xs text-white font-mono focus:outline-none focus:border-orange-500/40 uppercase"
+               placeholder="NONE"
+             />
           </div>
+
+          <button
+            onClick={handleFetch}
+            disabled={status === 'processing'}
+            className="w-full py-1.5 bg-orange-600/10 border border-orange-500/30 text-orange-400
+                       hover:bg-orange-600/20 transition-all text-xs font-hud tracking-widest font-bold uppercase"
+          >
+            {status === 'processing' ? '⟳ LOADING...' : '▶ EXECUTE_FETCH'}
+          </button>
         </div>
-
-        <button
-          onClick={handleFetch}
-          disabled={status === 'processing'}
-          className="mt-3 w-full py-1.5 rounded-lg text-xs font-hud tracking-widest
-                     bg-orange-600/20 border border-orange-500/40 text-orange-300
-                     hover:bg-orange-600/40 hover:border-orange-400 transition-all
-                     disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {status === 'processing' ? '⟳ FETCHING...' : '▶ FETCH POSTS'}
-        </button>
-
-        {posts.length > 0 && (
-          <div className="mt-2 space-y-1 max-h-24 overflow-y-auto">
-            {posts.slice(0, 3).map(p => (
-              <div key={p.id} className="text-xs text-gray-400 font-mono truncate
-                                         border-l-2 border-orange-500/30 pl-2">
-                ↑{p.score} {p.title}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
-      {/* Output handle */}
-      <Handle id="redditSource-source" type="source" position={Position.Bottom} isConnectable={true}
-              style={{ bottom: -5, background: '#ff6b00', boxShadow: '0 0 8px #ff6b00', zIndex: 999 }} />
+      {/* Unified Handle */}
+      <Handle id="redditSource-source" type="source" position={Position.Bottom} isConnectable={true} />
     </div>
     </RotatableNodeWrapper>
   )
-}
+})
 
 // ============================================================
 // NODE: Prompt Refiner (AI Agent)
 // ============================================================
-const PromptRefinerNode = ({ id, data, selected }) => {
-  const { editMode, isMovementLocked, isFunctionLocked, setTotalTokens } = useEditMode()
+const PromptRefinerNode = React.memo(({ id, data, selected }) => {
+  const { updateNodeData } = useReactFlow()
+  const { editMode, isMovementLocked, isFunctionLocked, setInputTokens, setOutputTokens } = useEditMode()
   const [rawIdea, setRawIdea] = useState(data?.rawIdea ?? '')
-  const [provider, setProvider] = useState('litellm')
+  const [provider, setProvider] = useState(data?.provider ?? 'openai')
   const [status, setStatus] = useState('idle')
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState(data?.result ?? null)
+
+  useEffect(() => {
+    if (data?.rawIdea !== undefined) setRawIdea(data.rawIdea)
+    if (data?.provider !== undefined) setProvider(data.provider)
+    if (data?.result !== undefined) setResult(data.result)
+  }, [data?.rawIdea, data?.provider, data?.result])
 
   const handleRefine = async () => {
     if (!rawIdea.trim()) return
@@ -218,10 +222,14 @@ const PromptRefinerNode = ({ id, data, selected }) => {
         iterations: 1
       })
       setResult(res.data)
+      updateNodeData(id, { result: res.data })
       setStatus('completed')
       
-      if (res.data.tokens_used && setTotalTokens) {
-         setTotalTokens(prev => prev + res.data.tokens_used)
+      if (res.data.input_tokens !== undefined && setInputTokens) {
+         setInputTokens(prev => prev + res.data.input_tokens)
+      }
+      if (res.data.output_tokens !== undefined && setOutputTokens) {
+         setOutputTokens(prev => prev + res.data.output_tokens)
       }
       
       data?.onRefine?.(res.data)
@@ -230,18 +238,23 @@ const PromptRefinerNode = ({ id, data, selected }) => {
     }
   }
 
+    const sourceConns = useHandleConnections({ type: 'source' });
+    const targetConns = useHandleConnections({ type: 'target' });
+    const isConnected = sourceConns.length > 0 || targetConns.length > 0;
+    const config = NODE_CONFIG.promptRefiner;
+
   return (
     <RotatableNodeWrapper id={id} rotation={data?.rotation ?? 0} isMovementLocked={isMovementLocked} editMode={editMode} minWidth={260} minHeight={150}>
-    <div className={`relative min-w-[260px] rounded-xl
-                     ${selected ? 'ring-2 ring-neon-cyan' : ''}
+    <div className={`relative min-w-[260px] ${isConnected ? config?.glow : ''}
+                     ${selected ? `ring-2 ring-neon-${config?.color || 'cyan'} shadow-[0_0_15px_rgba(245,158,11,0.2)]` : ''}
                      ${status === 'processing' ? 'node-processing' : 'node-idle'}
                      ${editMode ? 'node-edit-active' : ''} h-full pointer-events-none`}>
-      <div className={`border ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : 'border-neon-cyan/20'} rounded-xl p-4 overflow-hidden relative w-full h-full pointer-events-auto`}
-           style={{ background: 'linear-gradient(135deg, #001e20 0%, #0f1629 100%)' }}>
+      <div className={`node-chassis glow-t glow-b border-[1.5px] ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : `border-neon-${config?.color || 'cyan'}/20`} p-4 relative w-full h-full pointer-events-auto`}
+           style={{ background: 'var(--industrial-bg)' }}>
         {editMode && <div className="absolute top-2 right-2 text-amber-500/80 text-[10px] animate-[spin_6s_linear_infinite]">⚙️</div>}
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 rounded-lg bg-neon-cyan/10 border border-neon-cyan/30
-                          flex items-center justify-center text-lg">🤖</div>
+          <div className={`w-8 h-8 rounded-lg bg-neon-${config?.color || 'cyan'}/10 border border-neon-${config?.color || 'cyan'}/30
+                          flex items-center justify-center text-lg`}>{config?.emoji || '⚙️'}</div>
           <div>
             <div className="font-hud text-xs text-neon-cyan tracking-widest">NODE-02</div>
             <div className="font-body text-sm font-semibold text-white">AI Prompt Refiner</div>
@@ -258,7 +271,10 @@ const PromptRefinerNode = ({ id, data, selected }) => {
             <textarea
               disabled={isFunctionLocked}
               value={rawIdea}
-              onChange={e => setRawIdea(e.target.value)}
+              onChange={e => {
+                setRawIdea(e.target.value)
+                updateNodeData(id, { rawIdea: e.target.value })
+              }}
               rows={3}
               className="w-full mt-1 bg-dark-900 border border-neon-cyan/20 rounded px-2 py-1.5
                          text-xs text-neon-cyan/80 font-mono focus:outline-none focus:border-neon-cyan/60 resize-none disabled:opacity-50"
@@ -266,16 +282,27 @@ const PromptRefinerNode = ({ id, data, selected }) => {
             />
           </div>
           <div className="flex items-center justify-between mt-3">
-            <label className="text-xs text-gray-400 font-mono">LLM PROVIDER</label>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-400 font-mono">LLM PROVIDER</label>
+              {provider === 'ollama' ? (
+                <span className="text-[9px] px-1.5 py-[1px] rounded border border-neon-green/50 text-neon-green bg-neon-green/10 font-bold tracking-widest">[LOCAL]</span>
+              ) : (
+                <span className="text-[9px] px-1.5 py-[1px] rounded border border-orange-500/50 text-orange-400 bg-orange-500/10 font-bold tracking-widest">[CLOUD]</span>
+              )}
+            </div>
             <select
               disabled={isFunctionLocked}
               value={provider}
-              onChange={e => setProvider(e.target.value)}
+              onChange={e => {
+                setProvider(e.target.value)
+                updateNodeData(id, { provider: e.target.value })
+              }}
               className="bg-dark-900 border border-neon-cyan/30 text-neon-cyan text-xs font-hud rounded px-2 py-1 outline-none focus:border-neon-cyan disabled:opacity-50"
             >
-              <option value="litellm">GPT/Claude (LiteLLM)</option>
-              <option value="groq">Llama-3 (Groq)</option>
-              <option value="ollama">Local (Ollama)</option>
+              <option value="openai">GPT-4o (OpenAI)</option>
+              <option value="anthropic">Claude 3.5 (Anthropic)</option>
+              <option value="groq">Llama-3-70b (Groq)</option>
+              <option value="ollama">Llama-3 (Ollama)</option>
             </select>
           </div>
         </div>
@@ -307,49 +334,60 @@ const PromptRefinerNode = ({ id, data, selected }) => {
           </div>
         )}
       </div>
-      <Handle id="promptRefiner-target" type="target" position={Position.Top}
-              style={{ top: -5, background: '#00f5ff', boxShadow: '0 0 8px #00f5ff', zIndex: 999 }} />
-      <Handle id="promptRefiner-source" type="source" position={Position.Bottom} isConnectable={true}
-              style={{ bottom: -5, background: '#00f5ff', boxShadow: '0 0 8px #00f5ff', zIndex: 999 }} />
+        <Handle id="promptRefiner-target" type="target" position={Position.Top} />
+        <Handle id="promptRefiner-source" type="source" position={Position.Bottom} />
     </div>
     </RotatableNodeWrapper>
   )
-}
+})
 
 // ============================================================
 // NODE: Human Approval Gate
 // ============================================================
-const HumanApprovalNode = ({ id, data, selected }) => {
+const HumanApprovalNode = React.memo(({ id, data, selected }) => {
+  const { updateNodeData } = useReactFlow()
   const { editMode, isMovementLocked, isFunctionLocked } = useEditMode()
   const [approved, setApproved] = useState(data?.approved ?? false)
-  const [rejected, setRejected] = useState(false)
+  const [rejected, setRejected] = useState(data?.rejected ?? false)
+
+  useEffect(() => {
+    if (data?.approved !== undefined) setApproved(data.approved)
+    if (data?.rejected !== undefined) setRejected(data.rejected)
+  }, [data?.approved, data?.rejected])
 
   const handleApprove = () => {
     setApproved(true)
     setRejected(false)
+    updateNodeData(id, { approved: true, rejected: false })
     data?.onChange?.({ approved: true })
   }
   const handleReject = () => {
     setApproved(false)
     setRejected(true)
+    updateNodeData(id, { approved: false, rejected: true })
     data?.onChange?.({ approved: false })
   }
 
   const borderColor = approved ? 'border-neon-green/40' : rejected ? 'border-red-500/40' : 'border-purple-500/30'
   const bg = approved ? '#001a00' : rejected ? '#1a0000' : '#0d001a'
 
+    const sourceConns = useHandleConnections({ type: 'source' });
+    const targetConns = useHandleConnections({ type: 'target' });
+    const isConnected = sourceConns.length > 0 || targetConns.length > 0;
+    const config = NODE_CONFIG.humanApproval;
+
   return (
     <RotatableNodeWrapper id={id} rotation={data?.rotation ?? 0} isMovementLocked={isMovementLocked} editMode={editMode} minWidth={220} minHeight={120}>
-    <div className={`relative min-w-[220px] rounded-xl
-                     ${selected ? 'ring-2 ring-neon-purple' : ''} node-idle
+    <div className={`relative min-w-[220px] ${isConnected ? config.glow : ''}
+                     ${selected ? `ring-2 ring-neon-${config.color} shadow-[0_0_15px_rgba(191,0,255,0.2)]` : ''} node-idle
                      ${editMode ? 'node-edit-active' : ''} h-full pointer-events-none`}>
-      <div className={`border ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : borderColor} rounded-xl p-4 overflow-hidden relative w-full h-full pointer-events-auto`}
-           style={{ background: `linear-gradient(135deg, ${bg} 0%, #0f1629 100%)` }}>
+      <div className={`node-chassis glow-t glow-b border-[1.5px] ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : borderColor} p-4 relative w-full h-full pointer-events-auto`}
+           style={{ background: 'var(--industrial-bg)' }}>
         {editMode && <div className="absolute top-2 right-2 text-amber-500/80 text-[10px] animate-[spin_6s_linear_infinite]">⚙️</div>}
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 rounded-lg bg-purple-600/20 border border-purple-500/40
-                          flex items-center justify-center text-lg">
-            {approved ? '✅' : rejected ? '❌' : '👁️'}
+          <div className={`w-8 h-8 rounded-lg bg-${config.color}-600/20 border border-${config.color}-500/40
+                          flex items-center justify-center text-lg`}>
+            {approved ? '✅' : rejected ? '❌' : config.emoji}
           </div>
           <div>
             <div className="font-hud text-xs text-purple-400 tracking-widest">NODE-03</div>
@@ -392,52 +430,69 @@ const HumanApprovalNode = ({ id, data, selected }) => {
         </div>
       </div>
       {/* Handles */}
-      <Handle id="human-target" type="target" position={Position.Top}
-              style={{ top: -5, background: '#bf00ff', boxShadow: '0 0 8px #bf00ff', zIndex: 999 }} />
-      <Handle id="human-source" type="source" position={Position.Bottom} isConnectable={approved}
-              style={{ bottom: -5, background: approved ? '#bf00ff' : '#444', 
-                       boxShadow: approved ? '0 0 8px #bf00ff' : 'none', zIndex: 999 }} />
+      <Handle id="humanApproval-target" type="target" position={Position.Top} />
+      <Handle id="humanApproval-source" type="source" position={Position.Bottom} />
     </div>
     </RotatableNodeWrapper>
   )
-}
+})
 
 // ============================================================
 // NODE: Reddit Publisher
 // ============================================================
-const PublisherNode = ({ id, data, selected }) => {
+const PublisherNode = React.memo(({ id, data, selected }) => {
+  const { updateNodeData } = useReactFlow()
   const { editMode, isMovementLocked, isFunctionLocked } = useEditMode()
   const [status, setStatus] = useState('idle')
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState(data?.result ?? null)
   const [subreddit, setSubreddit] = useState(data?.subreddit ?? 'SideProject')
+  const [title, setTitle] = useState(data?.title ?? 'Post Title')
+
+  useEffect(() => {
+    if (data?.subreddit !== undefined) setSubreddit(data.subreddit)
+    if (data?.title !== undefined) setTitle(data.title)
+    if (data?.result !== undefined) setResult(data.result)
+  }, [data?.subreddit, data?.title, data?.result])
 
   const handlePublish = async () => {
-    setStatus('processing')
+    setStatus('processing');
     try {
-      const res = await axios.post('http://127.0.0.1:8000/api/mock/publish', {
-        subreddit: data?.subreddit ?? 'SideProject',
-        content: 'Flow automation pipeline test...'
-      })
-      setResult(res.data)
-      setStatus('completed')
-      data?.onPublish?.(res.data)
-    } catch {
-      setStatus('error')
+      const allNodes = getNodes();
+      const refiner = allNodes.find(n => n.type === 'promptRefiner');
+      const imageNode = allNodes.find(n => n.type === 'imageNode');
+      
+      const payload = {
+        nodes: allNodes,
+        text: refiner?.data?.response || title,
+        subreddit: subreddit,
+        image_url: imageNode?.data?.imageUrl || null
+      };
+
+      const res = await axios.post('http://localhost:8000/api/reddit/publish', payload);
+      setResult({ status: 'SUCCESS', post_id: res.data.url });
+      setStatus('completed');
+    } catch (err) {
+      console.error("Publishing error:", err);
+      setStatus('error');
     }
-  }
+  };
+
+    const targetConns = useHandleConnections({ type: 'target' });
+    const isConnected = targetConns.length > 0;
+    const config = NODE_CONFIG.publisher;
 
   return (
     <RotatableNodeWrapper id={id} rotation={data?.rotation ?? 0} isMovementLocked={isMovementLocked} editMode={editMode} minWidth={240} minHeight={120}>
-    <div className={`relative min-w-[240px] rounded-xl
-                     ${selected ? 'ring-2 ring-neon-green' : ''}
+    <div className={`relative min-w-[220px] ${isConnected ? config?.glow : ''}
+                     ${selected ? `ring-2 ring-neon-${config?.color || 'purple'} shadow-[0_0_15px_rgba(57,255,20,0.2)]` : ''} 
                      ${status === 'processing' ? 'node-processing' : 'node-idle'}
                      ${editMode ? 'node-edit-active' : ''} h-full pointer-events-none`}>
-      <div className={`border ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : 'border-neon-green/30'} rounded-xl p-4 overflow-hidden relative w-full h-full pointer-events-auto`}
-           style={{ background: 'linear-gradient(135deg, #001a05 0%, #0f1629 100%)' }}>
+      <div className={`node-chassis glow-t border-[1.5px] ${editMode && !isMovementLocked ? 'border-dashed border-2 border-amber-500' : `border-neon-${config?.color || 'purple'}/30`} p-4 relative w-full h-full pointer-events-auto`}
+           style={{ background: 'var(--industrial-bg)' }}>
         {editMode && <div className="absolute top-2 right-2 text-amber-500/80 text-[10px] animate-[spin_6s_linear_infinite]">⚙️</div>}
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 rounded-lg bg-neon-green/10 border border-neon-green/30
-                          flex items-center justify-center text-lg">🚀</div>
+          <div className={`w-8 h-8 rounded-lg bg-neon-${config?.color || 'purple'}/10 border border-neon-${config?.color || 'purple'}/30
+                          flex items-center justify-center text-lg`}>{config?.emoji || '👤'}</div>
           <div>
             <div className="font-hud text-xs text-neon-green tracking-widest">NODE-04</div>
             <div className="font-body text-sm font-semibold text-white">Reddit Publisher</div>
@@ -455,15 +510,33 @@ const PublisherNode = ({ id, data, selected }) => {
             <input
               disabled={isFunctionLocked}
               value={subreddit}
-              onChange={e => setSubreddit(e.target.value)}
-              className="flex-1 bg-dark-900 border border-neon-green/20 rounded px-2 py-1
+              onChange={e => {
+                setSubreddit(e.target.value)
+                updateNodeData(id, { subreddit: e.target.value })
+              }}
+              className="flex-1 bg-dark-900 border border-neon-green/20 px-2 py-1
                          text-sm text-white font-mono focus:outline-none focus:border-neon-green/60 disabled:opacity-50"
               placeholder="SideProject"
             />
           </div>
         </div>
 
-        <div className="mt-3 bg-dark-900/60 rounded p-2 border border-neon-green/10">
+        <div className="mt-2">
+          <label className="text-xs text-gray-400 font-mono">POST TITLE</label>
+          <input
+            disabled={isFunctionLocked}
+            value={title}
+            onChange={e => {
+              setTitle(e.target.value)
+              updateNodeData(id, { title: e.target.value })
+            }}
+            className="w-full mt-1 bg-dark-900 border border-neon-green/20 px-2 py-1
+                       text-sm text-white font-mono focus:outline-none focus:border-neon-green/60 disabled:opacity-50"
+            placeholder="Your post title..."
+          />
+        </div>
+
+        <div className="mt-3 bg-dark-900/60 p-2 border border-neon-green/10">
           <div className="text-xs font-mono text-gray-400 space-y-0.5">
             <div className="flex justify-between">
               <span>Rate Limit</span>
@@ -484,7 +557,7 @@ const PublisherNode = ({ id, data, selected }) => {
           id="publisher-execute-btn"
           onClick={handlePublish}
           disabled={status === 'processing'}
-          className="mt-3 w-full py-1.5 rounded-lg text-xs font-hud tracking-widest
+          className="mt-3 w-full py-1.5 text-xs font-hud tracking-widest
                      bg-neon-green/10 border border-neon-green/30 text-neon-green
                      hover:bg-neon-green/20 hover:border-neon-green/60 transition-all
                      disabled:opacity-40 disabled:cursor-not-allowed"
@@ -493,9 +566,18 @@ const PublisherNode = ({ id, data, selected }) => {
         </button>
 
         {result && (
-          <div className="mt-2 bg-dark-900/80 rounded p-2 text-xs font-mono
-                          border border-neon-green/20 text-neon-green/80">
-            ✓ {result.status} → {result.post_id}
+          <div className="mt-2 bg-dark-900/80 p-2 text-[10px] font-mono
+                          border border-neon-green/20 text-neon-green/80 flex flex-col gap-1 overflow-hidden">
+            <div className="flex justify-between items-center">
+              <span>STATUS: ✓ {result.status}</span>
+              <button 
+                onClick={() => window.open(result.post_id, '_blank')}
+                className="text-neon-cyan hover:underline decoration-neon-cyan/50"
+              >
+                VIEW POST ↗
+              </button>
+            </div>
+            <div className="text-[8px] truncate opacity-60">ID: {result.post_id}</div>
           </div>
         )}
         {status === 'error' && (
@@ -504,103 +586,193 @@ const PublisherNode = ({ id, data, selected }) => {
           </div>
         )}
       </div>
-      <Handle id="publisher-target" type="target" position={Position.Top}
-              style={{ top: -5, background: '#39ff14', boxShadow: '0 0 8px #39ff14', zIndex: 999 }} />
+      <Handle id="publisher-target" type="target" position={Position.Top} />
     </div>
     </RotatableNodeWrapper>
   )
-}
+})
+
+
 
 // ============================================================
-// Node type registry
+// Node type registry (Static Global Catalog for Stability)
 // ============================================================
-
-const nodeTypes = {
+const STATIC_NODE_TYPES = {
   redditSource: RedditSourceNode,
   promptRefiner: PromptRefinerNode,
   humanApproval: HumanApprovalNode,
   publisher: PublisherNode,
-  hardwareNode: HardwareNode,
   decisionNode: DecisionNode,
-}
+  imageNode: ImageNode,
+  bunkerLock: BunkerNode,
+  telegramNode: TelegramNode,
+  scraperNode: ScraperNode,
+};
+
+// ============================================================
+// Helper: Export Interceptor
+// ============================================================
+const handleExportBlueprint = async (nodes, edges) => {
+  const lockedBunker = nodes.find(n => n.type === 'bunkerLock' && n.data?.isLocked === true);
+  
+  if (lockedBunker) {
+    alert("CRITICAL SECURITY HALT: Cannot export blueprint while Búnker Protocol is ACTIVE (LOCKED). Unlock the Bunker node to proceed with exfiltration.");
+    return;
+  }
+
+  try {
+    const response = await axios.post('http://localhost:8000/api/blueprint/export', {
+      nodes,
+      edges
+    });
+
+    const isEncrypted = response.data.status === 'SECURE_ENCRYPTED';
+    const payload = isEncrypted ? response.data.payload : JSON.stringify(response.data.payload, null, 2);
+    const filename = isEncrypted ? 'sf_vault.bin' : 'sf_layout.json';
+    const mimeType = isEncrypted ? 'application/octet-stream' : 'application/json';
+
+    const blob = new Blob([payload], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    if (isEncrypted) {
+      alert("VAULT EXPORT SUCCESSFUL: Your blueprint has been AES-256 encrypted. Access requires the clearance key.");
+    }
+  } catch (err) {
+    console.error("Export failure:", err);
+    alert("CRITICAL EXPORT FAILURE: Could not secure the blueprint via backend gateway.");
+  }
+};
 
 // ============================================================
 // Default node layout
 // ============================================================
 
-const defaultNodes = [
-  {
-    id: '1',
-    type: 'redditSource',
-    position: { x: 60, y: 180 },
-    data: { subreddit: 'MachineLearning', keyword: 'AI automation' },
-    deletable: true,
-  },
-  {
-    id: '2',
-    type: 'promptRefiner',
-    position: { x: 380, y: 140 },
-    data: { rawIdea: 'AI automation for Reddit growth hacking' },
-    deletable: true,
-  },
-  {
-    id: '3',
-    type: 'humanApproval',
-    position: { x: 720, y: 160 },
-    data: { approved: false },
-    deletable: true,
-  },
-  {
-    id: '4',
-    type: 'publisher',
-    position: { x: 1020, y: 150 },
-    data: { subreddit: 'SideProject' },
-    deletable: true,
-  },
-  {
-    id: '5',
-    type: 'decisionNode',
-    position: { x: 550, y: 350 },
-    data: {},
-    deletable: true,
-  },
-]
+const defaultNodes = []
 
-const defaultEdges = [
-  { id: 'e1-2', source: '1', target: '2', animated: true, deletable: true },
-  { id: 'e2-3', source: '2', target: '3', animated: true, deletable: true },
-  { id: 'e3-4', source: '3', target: '4', animated: true, deletable: true },
-]
+const defaultEdges = []
 
 // ============================================================
-// FlowCanvas — Main export
-// ============================================================
-
 const FlowCanvas = ({ onNodeSelect }) => {
-  const { editMode, isMovementLocked, isFunctionLocked } = useEditMode()
+  const { isEditMode, editMode, toggleEditMode, isMovementLocked, isFunctionLocked } = useEditMode()
   const { getNode } = useReactFlow()
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(() => {
+  // Undo / Redo system (Moved up to be available for onNodesChange/onEdgesChange)
+  const [past, setPast] = useState([])
+  const [future, setFuture] = useState([])
+  const [isHydrated, setIsHydrated] = useState(false)
+
+  const [dynamicNodes, setDynamicNodes] = useState(getDynamicNodes());
+
+  useEffect(() => {
+    const handleUpdate = () => setDynamicNodes(getDynamicNodes());
+    window.addEventListener('sf_registry_updated', handleUpdate);
+    return () => window.removeEventListener('sf_registry_updated', handleUpdate);
+  }, []);
+
+  // Stabilize Registration via useMemo (Principal SE Recommendation)
+  const nodeTypes = useMemo(() => {
+    const types = { ...STATIC_NODE_TYPES };
+    Object.keys(dynamicNodes).forEach(id => {
+      types[id] = GenericCustomNode;
+    });
+    return types;
+  }, [dynamicNodes]);
+
+  const edgeTypes = useMemo(() => ({}), []);
+  
+  // Atomic Initialization
+  const INITIAL_NODES = useMemo(() => [], []);
+  const INITIAL_EDGES = useMemo(() => [], []);
+  const [nodes, setNodes] = useState(INITIAL_NODES);
+  const [edges, setEdges] = useState(INITIAL_EDGES);
+
+  // Hydration logic: Load from storage after mounting to ensure stable initial state
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem('rfn_nodes')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        // Validate against registry whitelist
-        const validNodes = parsed.filter(n => nodeTypes[n.type])
-        if (validNodes.length > 0) return validNodes
+      const savedNodes = localStorage.getItem('sf-nodes')
+      if (savedNodes) {
+        try {
+          const parsed = JSON.parse(savedNodes)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const validNodes = parsed.filter(n => n && n.id && n.type && nodeTypes[n.type])
+            setNodes(validNodes.length > 0 ? validNodes : [])
+          } else {
+            setNodes([])
+          }
+        } catch (je) {
+          console.error("SYSTEM: Corrupted Nodes detected. Forced reset to [].")
+          setNodes([])
+        }
+      } else {
+        setNodes([])
       }
+
+      const savedEdges = localStorage.getItem('sf-edges')
+      if (savedEdges) {
+        try {
+          const parsed = JSON.parse(savedEdges)
+          setEdges(Array.isArray(parsed) ? parsed : [])
+        } catch (je) {
+          setEdges([])
+        }
+      } else {
+        setEdges([])
+      }
+      
+      // Atomic Hydration Success
+      setIsHydrated(true)
     } catch (e) {
-      console.warn("Storage node parse error", e)
+      console.error("[SYSTEM] CRITICAL_HYDRATION_FAILURE. Reverting to SAFE_MODE.");
+      setNodes(defaultNodes)
+      setEdges(defaultEdges)
+      setIsHydrated(true)
     }
-    return defaultNodes
-  })
-  const [edges, setEdges, onEdgesChange] = useEdgesState(() => {
-    try {
-      const saved = localStorage.getItem('rfn_edges')
-      if (saved) return JSON.parse(saved)
-    } catch (e) {}
-    return defaultEdges
-  })
+  }, [setNodes, setEdges])
+
+  const takeSnapshot = useCallback(() => {
+    setPast(p => [...p, { nodes, edges }])
+    setFuture([])
+  }, [nodes, edges])
+
+  // Wrapping in useCallback as requested for stabilized references and undo/redo capture
+  // Senior Interaction Guard: Reinforces change stability
+  // Change Handlers Protection (Principal SE Reconstruction)
+  const onNodesChange = useCallback((changes) => {
+    if (!changes || changes.length === 0) return;
+    takeSnapshot();
+    setNodes((nds) => applyNodeChanges(changes, nds || []));
+  }, [takeSnapshot]);
+
+  const onEdgesChange = useCallback((changes) => {
+    if (!changes || changes.length === 0) return;
+    takeSnapshot();
+    setEdges((eds) => applyEdgeChanges(changes, eds || []));
+  }, [takeSnapshot]);
+
+  // Senior Interaction Guard: Prevents crashes during rapid edit-mode transitions
+  const handleLockToggle = useCallback(() => {
+    if (!nodes || nodes.length === 0) {
+      console.warn("[SYSTEM] Interaction Blocked: No nodes detected in local buffer.");
+      return;
+    }
+    // Final Safety Guard (Principal SE)
+    if (typeof toggleEditMode === 'function') {
+      toggleEditMode();
+    }
+  }, [nodes, toggleEditMode]);
+
+  // --- Physical Lockdown: Bunker State Sync ---
+  const systemIsLocked = React.useMemo(() => 
+    nodes.some(n => n.type === 'bunkerLock' && n.data?.isLocked !== false),
+    [nodes]
+  );
 
   // Enforcer for legacy edges and globally styling decision nodes
   useEffect(() => {
@@ -643,21 +815,16 @@ const FlowCanvas = ({ onNodeSelect }) => {
   }, [nodes, setEdges, setNodes]);
 
   useEffect(() => {
-    localStorage.setItem('rfn_nodes', JSON.stringify(nodes))
-  }, [nodes])
+    if (!isHydrated || !nodes || !Array.isArray(nodes)) return;
+    localStorage.setItem('sf-nodes', JSON.stringify(nodes))
+  }, [nodes, isHydrated])
 
   useEffect(() => {
-    localStorage.setItem('rfn_edges', JSON.stringify(edges))
-  }, [edges])
+    if (!isHydrated || !edges || !Array.isArray(edges)) return;
+    localStorage.setItem('sf-edges', JSON.stringify(edges))
+  }, [edges, isHydrated])
 
-  // Undo / Redo system
-  const [past, setPast] = useState([])
-  const [future, setFuture] = useState([])
-
-  const takeSnapshot = useCallback(() => {
-    setPast(p => [...p, { nodes, edges }])
-    setFuture([])
-  }, [nodes, edges])
+  // (Undo/Redo logic moved up)
 
   const undo = () => {
     if (past.length === 0) return
@@ -749,9 +916,13 @@ const FlowCanvas = ({ onNodeSelect }) => {
   }, [edgeMenu, setEdges])
 
   const onConnect = useCallback((params) => {
+    if (!params.source || !params.target) return;
+    takeSnapshot();
+    
+    // Principal SE: Memoized Dynamic Style Detection
     const sourceNode = getNode(params.source);
     const isHardware = sourceNode?.type === 'hardwareNode';
-    const isFail = params.sourceHandle === 'fail';
+    const isFail = params.sourceHandle === 'fail' || params.sourceHandle === 'decision-fail';
 
     const edgeStyle = {
       stroke: isHardware ? '#FFD700' : (isFail ? '#FF4D4D' : '#00E5FF'),
@@ -760,11 +931,19 @@ const FlowCanvas = ({ onNodeSelect }) => {
 
     setEdges((eds) => addEdge({ 
       ...params, 
+      id: `e-${params.source}-${params.target}-${Date.now()}`,
       type: 'smoothstep',
       animated: true, 
       style: edgeStyle 
-    }, eds));
-  }, [getNode, setEdges]);
+    }, eds || []));
+
+    // Phase XVI: Dynamic Data Flux Integration
+    setNodes((nds) => nds.map((node) => 
+      node.id === params.target 
+        ? { ...node, data: { ...node.data, sourceNodeId: params.source } } 
+        : node
+    ));
+  }, [getNode, setEdges, setNodes, takeSnapshot]);
 
   const onNodeClick = useCallback((_, node) => {
     onNodeSelect?.(node)
@@ -783,20 +962,45 @@ const FlowCanvas = ({ onNodeSelect }) => {
       id: `${type}_${Date.now()}`,
       type,
       position,
-      data: { label: type },
+      data: dynamicNodes[type] ? { ...dynamicNodes[type] } : { ...NODE_CONFIG[type] },
       deletable: true,
     }
     takeSnapshot()
     setNodes(nds => [...nds, newNode])
-  }, [setNodes, takeSnapshot])
+  }, [setNodes, takeSnapshot, dynamicNodes])
 
   const onDragOver = useCallback((event) => {
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
+  // -----------------------------------------------------------------------
+  // Bootstrap Guard: Ensures flow utilities are correctly loaded (Principal SE)
+  // -----------------------------------------------------------------------
+  if (typeof applyNodeChanges !== 'function') {
+    return <div className="w-full h-screen bg-[#050810] flex items-center justify-center text-red-500 font-mono">Error Crítico: Utilidades de Flujo no cargadas. Reinstalando...</div>;
+  }
+
+  // -----------------------------------------------------------------------
+  // Render Gate: Stabilizes initial render by ensuring hydration is complete
+  // -----------------------------------------------------------------------
+  if (!isHydrated) {
+    return (
+      <div className="w-full h-screen bg-[#050810] flex flex-col items-center justify-center font-hud relative">
+        <div className="absolute inset-0 pointer-events-none opacity-5 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
+        <div className="relative z-10 flex flex-col items-center gap-6 text-center">
+          <div className="w-16 h-16 border-2 border-neon-cyan/20 border-t-neon-cyan rounded-full animate-spin shadow-[0_0_20px_rgba(0,245,255,0.2)]" />
+          <div className="flex flex-col items-center gap-2">
+            <h2 className="text-neon-cyan text-xs tracking-[0.4em] font-bold animate-pulse">SYNAPSE FLOW (SYSTEM)</h2>
+            <p className="text-[10px] text-gray-500 font-mono tracking-widest uppercase opacity-70">Synthesizing Neural Canvas...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full h-full rfn-canvas-grid rfn-scanline">
+    <div className="w-full h-screen rfn-canvas-grid rfn-scanline">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -812,8 +1016,10 @@ const FlowCanvas = ({ onNodeSelect }) => {
         onDragOver={onDragOver}
         nodeTypes={nodeTypes}
         fitView={true}
-        nodesConnectable={!isMovementLocked}
-        nodesDraggable={!isMovementLocked}
+        minZoom={0.05}
+        maxZoom={3}
+        nodesConnectable={isEditMode}
+        nodesDraggable={isEditMode}
         onNodesDelete={(deleted) => {
           takeSnapshot()
         }}
@@ -827,9 +1033,24 @@ const FlowCanvas = ({ onNodeSelect }) => {
         connectionLineStyle={{ stroke: '#00E5FF', strokeWidth: 2 }}
         deleteKeyCode={isMovementLocked ? null : ["Backspace", "Delete"]}
         selectionKeyCode={["Shift"]}
-        isValidConnection={() => true}
+        isValidConnection={(connection) => {
+          const sourceNode = nodes.find(n => n.id === connection.source);
+          const targetNode = nodes.find(n => n.id === connection.target);
+          
+          // Rule 1: Block Source -> Source loops
+          if (sourceNode?.type === 'redditSource' && targetNode?.type === 'redditSource') {
+            return false;
+          }
+          
+          // Rule 2: Block Publisher as a source (Terminal Node)
+          if (sourceNode?.type === 'publisher') {
+            return false;
+          }
+
+          return true;
+        }}
         connectionRadius={30}
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.5 }}
         defaultEdgeOptions={{ 
           type: 'smoothstep', 
           animated: true, 
@@ -844,51 +1065,102 @@ const FlowCanvas = ({ onNodeSelect }) => {
           size={1}
           color="rgba(0,245,255,0.08)"
         />
-        <DraggablePanel id="canvas_controls" defaultPos={{ x: 20, y: 400 }} disabled={!editMode || isMovementLocked} editModeContext={editMode}>
-          <Controls className="!bg-dark-800 !border-neon-cyan/20" position="top-left" style={{ position: 'relative', margin: 0, transform: 'none', left: 0, top: 0, bottom: 'auto', right: 'auto' }} />
-        </DraggablePanel>
+        {isHydrated && (
+          <DraggablePanel id="canvas_controls" defaultPos={{ x: 20, y: 400 }} disabled={!isEditMode || isMovementLocked} editModeContext={isEditMode}>
+            <Controls className="!bg-dark-800 !border-neon-cyan/20" position="top-left" style={{ position: 'relative', margin: 0, transform: 'none', left: 0, top: 0, bottom: 'auto', right: 'auto' }} />
+          </DraggablePanel>
+        )}
         
-        <DraggablePanel id="minimap-panel" defaultPos={{ x: 20, y: 500 }} disabled={!editMode || isMovementLocked} editModeContext={editMode}>
-          <MiniMap
-            position="top-left"
-            style={{ position: 'relative', margin: 0, width: 200, height: 150, transform: 'none', left: 0, top: 0, bottom: 'auto', right: 'auto' }}
-            nodeColor={(n) => {
-              switch (n.type) {
-                case 'redditSource': return '#ff6b00'
-                case 'promptRefiner': return '#00f5ff'
-                case 'humanApproval': return '#bf00ff'
-                case 'publisher': return '#39ff14'
-                case 'hardwareNode': return '#ff0044'
-                default: return '#444'
-              }
-            }}
-            maskColor="rgba(5,8,16,0.8)"
-          />
-        </DraggablePanel>
+        {isHydrated && (
+          <DraggablePanel id="minimap-panel" defaultPos={{ x: 20, y: 500 }} disabled={!isEditMode || isMovementLocked} editModeContext={isEditMode}>
+            <MiniMap
+              position="top-left"
+              style={{ position: 'relative', margin: 0, width: 200, height: 150, transform: 'none', left: 0, top: 0, bottom: 'auto', right: 'auto' }}
+              nodeColor={(n) => {
+                switch (n.type) {
+                  case 'redditSource': return '#ff6b00'
+                  case 'promptRefiner': return '#00f5ff'
+                  case 'humanApproval': return '#bf00ff'
+                  case 'publisher': return '#39ff14'
+                  case 'hardwareNode': return '#ff0044'
+                  default: return '#444'
+                }
+              }}
+              maskColor="rgba(5,8,16,0.8)"
+            />
+          </DraggablePanel>
+        )}
 
-        <DraggablePanel id="canvas-mode-toggle" defaultPos={{ x: 800, y: 20 }} disabled={!editMode || isMovementLocked} editModeContext={editMode}>
-          <div className="flex items-center gap-2 text-xs font-mono bg-dark-800/90
-                          border border-neon-cyan/20 rounded-lg px-3 py-1.5 shadow-[0_0_15px_rgba(0,245,255,0.2)]">
-            <span className="text-gray-500">CANVAS MODE</span>
-            <span className="text-neon-cyan text-glow-cyan">ACTIVE</span>
-          </div>
-        </DraggablePanel>
+        {isHydrated && (
+          <DraggablePanel id="canvas-mode-toggle" defaultPos={{ x: 800, y: 20 }} disabled={!isEditMode || isMovementLocked} editModeContext={isEditMode}>
+            <div 
+              onClick={handleLockToggle}
+              className={`flex items-center gap-2 text-xs font-mono bg-dark-800/90 cursor-pointer
+                          border ${isEditMode ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-neon-cyan/20'} rounded-lg px-3 py-1.5 transition-all`}
+            >
+              <span className={isEditMode ? 'text-amber-500' : 'text-gray-500'}>CANVAS MODE</span>
+              <span className={isEditMode ? 'text-amber-500 text-glow-amber' : 'text-neon-cyan text-glow-cyan'}>
+                {isEditMode ? 'UNLOCKED' : 'ACTIVE'}
+              </span>
+            </div>
+          </DraggablePanel>
+        )}
         
-        <DraggablePanel id="undo-redo-panel" defaultPos={{ x: 60, y: 20 }} disabled={!editMode || isMovementLocked} editModeContext={editMode}>
-          <div className="flex gap-2">
-            <button 
-              onClick={undo} disabled={past.length === 0}
-              className="px-3 py-1.5 rounded bg-dark-900 border border-neon-cyan/30 text-neon-cyan text-[10px] font-mono tracking-widest disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neon-cyan/20 transition-all">
-              ⟲ UNDO
-            </button>
-            <button 
-              onClick={redo} disabled={future.length === 0}
-              className="px-3 py-1.5 rounded bg-dark-900 border border-neon-cyan/30 text-neon-cyan text-[10px] font-mono tracking-widest disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neon-cyan/20 transition-all">
-              REDO ⟳
-            </button>
+        {isHydrated && (
+          <DraggablePanel id="undo-redo-panel" defaultPos={{ x: 60, y: 20 }} disabled={!isEditMode || isMovementLocked} editModeContext={isEditMode}>
+            <div className="flex gap-2">
+              <button 
+                onClick={undo} disabled={past.length === 0}
+                className="px-3 py-1.5 rounded bg-dark-900 border border-neon-cyan/30 text-neon-cyan text-[10px] font-mono tracking-widest disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neon-cyan/20 transition-all">
+                ⟲ UNDO
+              </button>
+              <button 
+                onClick={redo} disabled={future.length === 0}
+                className="px-3 py-1.5 rounded bg-dark-900 border border-neon-cyan/30 text-neon-cyan text-[10px] font-mono tracking-widest disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neon-cyan/20 transition-all">
+                REDO ⟳
+              </button>
+            </div>
+          </DraggablePanel>
+        )}
+
+        {isHydrated && (
+          <DraggablePanel id="blueprint-panel" defaultPos={{ x: window.innerWidth - 300, y: window.innerHeight - 80 }} disabled={!isEditMode || isMovementLocked} editModeContext={isEditMode}>
+            <div className="flex gap-2 p-2 bg-dark-900/80 border border-neon-cyan/30 rounded-lg shadow-2xl backdrop-blur-md">
+               <button 
+                  onClick={() => handleExportBlueprint(nodes, edges)} 
+                  disabled={systemIsLocked}
+                  className={`px-3 py-1.5 rounded text-[10px] font-mono tracking-widest transition-all font-bold
+                             ${systemIsLocked 
+                                ? 'bg-red-500/10 border border-red-500/40 text-red-500 opacity-40 cursor-not-allowed shadow-inner' 
+                                : 'bg-neon-cyan/10 border border-neon-cyan/50 text-neon-cyan hover:bg-neon-cyan/20 shadow-[0_0_10px_rgba(0,245,255,0.1)] hover:shadow-neon-cyan/30 hover:scale-[1.02]'}`}
+               >
+                  {systemIsLocked ? '[🔒] SYSTEM LOCKED' : '[↓] EXPORT BLUEPRINT'}
+               </button>
+             <button onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.onchange = e => {
+                   const file = e.target.files[0];
+                   if (!file) return;
+                   const reader = new FileReader();
+                   reader.onload = ev => {
+                      try {
+                         const json = JSON.parse(ev.target.result);
+                         if (json.nodes) setNodes(json.nodes);
+                         if (json.edges) setEdges(json.edges);
+                      } catch(err) { alert('Invalid Blueprint JSON format'); }
+                   };
+                   reader.readAsText(file);
+                };
+                input.click();
+             }} className="px-3 py-1.5 rounded bg-amber-500/10 border border-amber-500/50 text-amber-500 text-[10px] font-mono tracking-widest hover:bg-amber-500/20 transition-all font-bold">
+               [↑] IMPORT BLUEPRINT
+             </button>
           </div>
         </DraggablePanel>
-      </ReactFlow>
+      )}
+    </ReactFlow>
 
       {nodeMenu && typeof nodeMenu.x === 'number' && (
         <div style={{ top: nodeMenu.y, left: nodeMenu.x }} className="fixed z-[9999] bg-dark-900 border border-neon-cyan/50 rounded-lg p-2 shadow-[0_0_15px_rgba(0,245,255,0.2)]">
@@ -907,7 +1179,7 @@ const FlowCanvas = ({ onNodeSelect }) => {
             setEdgeMenu(null);
           }} className="block w-full text-left px-3 py-1.5 text-xs font-mono text-neon-cyan hover:bg-neon-cyan/20 rounded mt-1">⎘ Duplicar Conexión</button>
           
-          {editMode && (
+          {isEditMode && (
             <div className="mt-2 pt-2 border-t border-gray-700/50 flex gap-2 justify-center">
               {['#00f5ff', '#39ff14', '#bf00ff', '#ff6b00'].map(color => (
                 <button 

@@ -1,23 +1,25 @@
 import React from 'react';
 import { useEditMode } from '../contexts/EditModeContext';
-import { DEFAULT_LAYOUT } from '../App';
+import { DEFAULT_LAYOUT } from '../constants';
 
 const HUD = () => {
   const { 
-    editMode, 
+    isEditMode, 
     toggleEditMode, 
     isMovementLocked, 
     setIsMovementLocked,
     isFunctionLocked,
     setIsFunctionLocked,
-    totalTokens 
+    inputTokens,
+    outputTokens,
+    flatCostUSD
   } = useEditMode();
 
-  // Acumulador de totalUSD basado en los tokens consumidos
-  const totalUSD = (totalTokens * 0.00015).toFixed(4);
+  // Acumulador de totalUSD basado en los tokens consumidos + costos fijos (DALL-E, etc.)
+  const totalUSD = ((inputTokens * 0.00001) + (outputTokens * 0.00003) + flatCostUSD).toFixed(4);
 
   return (
-    <header className={`h-14 border border-neon-cyan/30 flex items-center px-6 shrink-0 rounded-xl relative overflow-hidden transition-all duration-300 ${editMode ? (isMovementLocked ? 'ring-1 ring-orange-500' : 'ring-2 ring-cyan-500') : ''}`}>
+    <header className={`h-14 border border-neon-cyan/30 flex items-center px-6 shrink-0 rounded-xl relative overflow-hidden transition-all duration-300 ${isEditMode ? (isMovementLocked ? 'ring-1 ring-orange-500' : 'ring-2 ring-cyan-500') : ''}`}>
       <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-neon-cyan to-transparent opacity-50" />
       
       <div className="flex items-center gap-3">
@@ -25,7 +27,7 @@ const HUD = () => {
           <span className="font-hud text-neon-cyan text-lg">⌬</span>
         </div>
         <div>
-           <h1 className="text-sm font-hud font-bold tracking-[0.2em] text-glow-cyan text-neon-cyan">SYNAPSE FLOW (SF-2026)</h1>
+           <h1 className="text-sm font-hud font-bold tracking-[0.2em] text-glow-cyan text-neon-cyan">SYNAPSE FLOW</h1>
            <p className="text-[10px] font-mono text-gray-500 uppercase">Cognitive Node Pipeline</p>
         </div>
       </div>
@@ -33,18 +35,16 @@ const HUD = () => {
       <div className="ml-auto flex items-center gap-[15px]">
         {/* Toggle Modo Edición */}
         <div className="flex items-center gap-2 bg-dark-900/50 border border-gray-600/30 rounded p-1 px-2">
-          <span className={`text-[10px] font-mono tracking-widest pointer-events-none ${editMode ? 'text-amber-500 text-glow-amber' : 'text-gray-500'}`}>Modo Edición</span>
+          <span className={`text-[10px] font-mono tracking-widest pointer-events-none ${isEditMode ? 'text-amber-500 text-glow-amber' : 'text-gray-500'}`}>Modo Edición</span>
           <button 
-            onClick={() => {
-               if(toggleEditMode) toggleEditMode(); 
-            }}
-            className={`relative w-9 h-4 rounded-full transition-colors border ${editMode ? 'bg-amber-500/20 border-amber-500 shadow-[0_0_10px_#f59e0b]' : 'bg-dark-900 border-gray-600'}`}
+            onClick={toggleEditMode}
+            className={`relative w-9 h-4 rounded-full transition-colors border ${isEditMode ? 'bg-amber-500/20 border-amber-500 shadow-[0_0_10px_#f59e0b]' : 'bg-dark-900 border-gray-600'}`}
           >
-            <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full transition-transform ${editMode ? 'translate-x-5 bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'translate-x-1 bg-gray-500'}`} />
+            <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full transition-transform ${isEditMode ? 'translate-x-5 bg-amber-400 shadow-[0_0_8px_#f59e0b]' : 'translate-x-1 bg-gray-500'}`} />
           </button>
         </div>
 
-        {editMode && (
+        {isEditMode && (
           <div className="flex gap-[15px] items-center">
             <button
               onClick={() => setIsMovementLocked(!isMovementLocked)}
@@ -87,7 +87,6 @@ const HUD = () => {
         </div>
         <div className="w-px h-6 bg-gray-800" />
         <div className="flex items-center gap-2 text-xs font-mono pointer-events-none">
-          <span className="text-gray-500">SYS_STATUS:</span>
           <span className="text-neon-green text-glow-green">ONLINE</span>
         </div>
       </div>
